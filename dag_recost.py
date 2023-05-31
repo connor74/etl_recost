@@ -36,6 +36,9 @@ def __get_dynamic_params(date, **kwargs):
 
 
 def __get_dynamic_params(date):
+    """
+    Загрузка динамических параметров для g-curve
+    """
     url = f"https://iss.moex.com//iss/history/engines/stock/zcyc.json?date={date}"
     r = requests.get(url)
     if r.status_code == 200:
