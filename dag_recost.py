@@ -18,25 +18,10 @@ default_args = {
     'is_paused_upon_creation': False,
 }
 
-
-def __get_dynamic_params(date, **kwargs):
-    print("TASK-1")
-    url = f"https://iss.moex.com//iss/history/engines/stock/zcyc.json?date={date}"
-    ti = kwargs['ti']
-    print(url)
-    r = requests.get(url)
-    if r.status_code == 200:
-        data = r.json()['params']["data"]
-        if data:
-            data = data[-1]
-            data.pop(1)
-            ti.xcom_push("dynamic_params", data)
-        else:
-            print("!!!!!!!!!!!! Нет данных")
-
+moex = "https://iss.moex.com/iss"
 
 def __get_dynamic_params(date):
-    url = f"https://iss.moex.com//iss/history/engines/stock/zcyc.json?date={date}"
+    url = f"{moex}/history/engines/stock/zcyc.json?date={date}"
     r = requests.get(url)
     if r.status_code == 200:
         params = r.json()['params']["data"]
@@ -57,7 +42,7 @@ def __get_dynamic_params(date):
 
 
 def __get_history_data(date):
-    link = 'http://iss.moex.com/iss/history/engines/stock/markets/bonds/securities.json'
+    link = f"{moex}/history/engines/stock/markets/bonds/securities.json"
     params = {
         'start': 1,
         'date': date
@@ -89,7 +74,7 @@ def __get_history_data(date):
 
 
 def __get_gspread_data(date):
-    link = 'http://iss.moex.com/iss/history/engines/stock/markets/bonds/yields.json'
+    link = f"{moex}/history/engines/stock/markets/bonds/yields.json"
     params = {
         'start': 1,
         'date': date,
@@ -115,7 +100,7 @@ def __get_gspread_data(date):
 
 
 def __get_params_data(date):
-    link = "http://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
+    link = f"{moex}/engines/stock/markets/bonds/securities.json"
     params = {
         'iss.only': 'securities',
         'securities.columns': 'BOARDID,SECID,ISIN,REGNUMBER,COUPONPERIOD,NEXTCOUPON,ISSUESIZE'
