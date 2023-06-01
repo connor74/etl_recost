@@ -137,7 +137,6 @@ def get_params_data(date):
         columns = securities['columns']
         df.columns = [x.lower() for x in columns]
         df["dt"] = date
-        #df['nextcoupon'] = df['nextcoupon'].apply(lambda x: x.replace('0000-00-00', ''))
         df["nextcoupon"].loc[df["nextcoupon"] == '0000-00-00'] = None
         pg_hook = PostgresHook.get_hook("pg_conn")
         engine = pg_hook.get_sqlalchemy_engine()
@@ -223,44 +222,9 @@ with DAG(
     )
 
 
-
-
-
-# https://moex-files.storage.yandexcloud.net/20221201.csv
-
 t_get_dynamic_params \
->> t_insert_dynamic_params \
 >> t_get_history_data \
 >> t_get_params_data \
 >> t_get_market_data \
 >> t_get_gspread_data \
 >> t_result_file
-"""
-link = 'http://iss.moex.com/iss/history/engines/stock/markets/bonds/securities.json'
-df = pd.DataFrame()
-while self.days > 0:
-    self.params['start'] = 1
-    while True:
-        r = requests.get(link, self.params)
-        data = r.json()['history']['data']
-        if not data and self.params['start'] == 1:
-            self.params['date'] = minus_day(self.params['date'])
-            break
-        elif not data and self.params['start'] != 1:
-            self.params['date'] = minus_day(self.params['date'])
-            self.days -= 1
-            break
-        else:
-            df = pd.concat([df, pd.DataFrame(data)])
-            self.params['start'] += 100
-    print(self.days)
-
-df.columns = r.json()['history']['columns']
-
-dates_columns = ['TRADEDATE', 'MATDATE', 'OFFERDATE', 'BUYBACKDATE', 'LASTTRADEDATE']
-df = df.apply(lambda x: pd.to_datetime(x) if x.name in dates_columns else x)
-float_columns = ['IRICPICLOSE', 'BEICLOSE', 'COUPONPERCENT', 'CBRCLOSE', 'YIELDLASTCOUPON']
-df = df.apply(lambda x: pd.to_numeric(x) if x.name in float_columns else x)
-df['ISDEALS'] = np.where(df['NUMTRADES'] > 0, 1, 0)
-
-"""
