@@ -1,12 +1,16 @@
 import pandas as pd
+import numpy as np
+import pathlib
 import requests
 from io import StringIO
+import boto3
 
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.providers.postgres.operators.postgres import PostgresOperator
 from airflow.operators.python import PythonOperator
-
+from airflow.operators.bash import BashOperator
 
 
 default_args = {
@@ -35,25 +39,30 @@ def __get_dynamic_params(date, **kwargs):
             print("!!!!!!!!!!!! Нет данных")
 
 
-def __get_dynamic_params(date):
-    url = f"https://iss.moex.com//iss/history/engines/stock/zcyc.json?date={date}"
-    r = requests.get(url)
-    if r.status_code == 200:
-        params = r.json()['params']["data"]
-        if not params:
-            return None
-        else:
-            params = params[-1]
-            params.pop(1)
+def insert_dynamic_params(**kwargs):
+    ti = kwargs['ti']
+    params = ti.xcom_pull(key="dynamic_params")
+    if params:
+        df = pd.DataFrame([params])
+        pg_hook = PostgresHook.get_hook("pg_conn")
+        engine = pg_hook.get_sqlalchemy_engine()
+        df.columns = ["dt", "betha_0", "betha_1", "betha_2", "theta", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8",
+                      "g9"]
+        print("После колонок:__________________________________________________________________")
+        row_count = df.to_sql("dynamic_params", engine, schema="recost", if_exists='append', index=False)
+        print(f'{row_count} rows was inserted')
+        """
+        pg_hook = PostgresHook(
+            postgres_conn_id='pg_conn',
+            schema='recost'
+        )
+        pg_conn = pg_hook.get_conn()
+        cursor = pg_conn.cursor()
+        cursor.execute(sql_stmt)
+        return cursor.fetchall()    
+        """
     else:
-        print("Status code: ", r.status_code)
-        return None
-    df = pd.DataFrame([params])
-    pg_hook = PostgresHook.get_hook("pg_conn")
-    engine = pg_hook.get_sqlalchemy_engine()
-    df.columns = ["dt", "betha_0", "betha_1", "betha_2", "theta", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8", "g9"]
-    row_count = df.to_sql("dynamic_params", engine, schema="recost", if_exists='append', index=False)
-    print(f'{row_count} rows was inserted')
+        print("DF is empty-----------------------------------------------")
 
 
 def __get_history_data(date):
@@ -87,6 +96,23 @@ def __get_history_data(date):
             row_count = df.to_sql("history_bonds", engine, schema="recost", if_exists='append', index=False)
             params['start'] += 100
 
+def __get_market_data(date):
+    link = "http://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
+    params = {
+        'iss.only': 'marketdata',
+        'marketdata.columns': 'BOARDID,SECID,BID,OFFER'
+    }
+    r = requests.get(link, params=params)
+    jsn = r.json()['marketdata']
+    if jsn['data']:
+        df = pd.DataFrame(jsn['data'])
+        columns = jsn['columns']
+        df.columns = [x.lower() for x in columns]
+        df["tradedate"] = date
+        pg_hook = PostgresHook.get_hook("pg_conn")
+        engine = pg_hook.get_sqlalchemy_engine()
+        row_count = df.to_sql("marketdata_bonds", engine, schema="recost", if_exists='append', index=False)
+        print(row_count)
 
 def __get_gspread_data(date):
     link = 'http://iss.moex.com/iss/history/engines/stock/markets/bonds/yields.json'
@@ -114,7 +140,7 @@ def __get_gspread_data(date):
             params['start'] += 100
 
 
-def __get_params_data(date):
+def get_params_data(date):
     link = "http://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
     params = {
         'iss.only': 'securities',
@@ -129,6 +155,7 @@ def __get_params_data(date):
         columns = securities['columns']
         df.columns = [x.lower() for x in columns]
         df["dt"] = date
+        #df['nextcoupon'] = df['nextcoupon'].apply(lambda x: x.replace('0000-00-00', ''))
         df["nextcoupon"].loc[df["nextcoupon"] == '0000-00-00'] = None
         pg_hook = PostgresHook.get_hook("pg_conn")
         engine = pg_hook.get_sqlalchemy_engine()
@@ -147,6 +174,7 @@ def __result_file(date):
         query_dynamic = f"SELECT * FROM recost.dynamic_params WHERE dt = '{date}'"
         df_dynamic = pd.read_sql(sql=query_dynamic, con=engine)
 
+        #str_dt = "".join(date.split("-"))
         with pd.ExcelWriter(f"/smb/share/{date}.xlsx", engine='xlsxwriter', datetime_format='dd.mm.yyyy') as writer:
             df.to_excel(writer, sheet_name='Sheet1', index=False)
             df_dynamic.to_excel(writer, sheet_name='Sheet2', index=False)
@@ -156,20 +184,44 @@ def __result_file(date):
 
 
 
+'''
+    s3 = boto3.session.Session(
+        aws_access_key_id="YCAJE0bLtz33SUKlCJ931wokc",
+        aws_secret_access_key="YCMilDYauxzdyF2UkDAJ-PsTm8-SSsQcZdCAj5Ic"
+    )
+    cl = s3.client('s3', endpoint_url="https://storage.yandexcloud.net")
+
+    cl.put_object(
+        Bucket="moex-files",
+        Body=csv_buffer.getvalue(),
+        Metadata={
+            "type": "moex_data",
+        },
+        Key=f"{str_dt}.csv"
+    )
+    csv_buffer.close()
+
+
+'''
 with DAG(
         "etl_recost_get_data",
         default_args=default_args,
         schedule_interval="50 2 * * *",
         catchup=True,
         max_active_runs=1
+        # template_searchpath="/tmp"
 ) as dag:
-
     t_get_dynamic_params = PythonOperator(
         task_id="t_get_dynamic_params",
         python_callable=__get_dynamic_params,
         op_kwargs={
             "date": "{{ds}}"
         }
+    )
+
+    t_insert_dynamic_params = PythonOperator(
+        task_id="t_insert_dynamic_params",
+        python_callable=insert_dynamic_params,
     )
 
     t_get_history_data = PythonOperator(
@@ -182,7 +234,15 @@ with DAG(
 
     t_get_params_data = PythonOperator(
         task_id="t_get_params_data",
-        python_callable=__get_params_data,
+        python_callable=get_params_data,
+        op_kwargs={
+            "date": "{{ds}}"
+        }
+    )
+
+    t_get_market_data = PythonOperator(
+        task_id="t_get_market_data",
+        python_callable=__get_market_data,
         op_kwargs={
             "date": "{{ds}}"
         }
@@ -204,8 +264,45 @@ with DAG(
         }
     )
 
+
+
+
+
+# https://moex-files.storage.yandexcloud.net/20221201.csv
+
 t_get_dynamic_params \
+>> t_insert_dynamic_params \
 >> t_get_history_data \
 >> t_get_params_data \
+>> t_get_market_data \
 >> t_get_gspread_data \
 >> t_result_file
+"""
+link = 'http://iss.moex.com/iss/history/engines/stock/markets/bonds/securities.json'
+df = pd.DataFrame()
+while self.days > 0:
+    self.params['start'] = 1
+    while True:
+        r = requests.get(link, self.params)
+        data = r.json()['history']['data']
+        if not data and self.params['start'] == 1:
+            self.params['date'] = minus_day(self.params['date'])
+            break
+        elif not data and self.params['start'] != 1:
+            self.params['date'] = minus_day(self.params['date'])
+            self.days -= 1
+            break
+        else:
+            df = pd.concat([df, pd.DataFrame(data)])
+            self.params['start'] += 100
+    print(self.days)
+
+df.columns = r.json()['history']['columns']
+
+dates_columns = ['TRADEDATE', 'MATDATE', 'OFFERDATE', 'BUYBACKDATE', 'LASTTRADEDATE']
+df = df.apply(lambda x: pd.to_datetime(x) if x.name in dates_columns else x)
+float_columns = ['IRICPICLOSE', 'BEICLOSE', 'COUPONPERCENT', 'CBRCLOSE', 'YIELDLASTCOUPON']
+df = df.apply(lambda x: pd.to_numeric(x) if x.name in float_columns else x)
+df['ISDEALS'] = np.where(df['NUMTRADES'] > 0, 1, 0)
+
+"""
