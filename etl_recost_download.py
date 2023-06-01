@@ -1,9 +1,6 @@
 import pandas as pd
-import numpy as np
-import pathlib
 import requests
-from io import StringIO
-import boto3
+
 
 from datetime import datetime, timedelta
 from airflow import DAG
@@ -122,7 +119,7 @@ def __get_gspread_data(date):
             params['start'] += 100
 
 
-def get_params_data(date):
+def __get_params_data(date):
     link = "http://iss.moex.com/iss/engines/stock/markets/bonds/securities.json"
     params = {
         'iss.only': 'securities',
@@ -191,7 +188,7 @@ with DAG(
 
     t_get_params_data = PythonOperator(
         task_id="t_get_params_data",
-        python_callable=get_params_data,
+        python_callable=__get_params_data,
         op_kwargs={
             "date": "{{ds}}"
         }
