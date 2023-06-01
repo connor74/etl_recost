@@ -184,25 +184,6 @@ def __result_file(date):
 
 
 
-'''
-    s3 = boto3.session.Session(
-        aws_access_key_id="YCAJE0bLtz33SUKlCJ931wokc",
-        aws_secret_access_key="YCMilDYauxzdyF2UkDAJ-PsTm8-SSsQcZdCAj5Ic"
-    )
-    cl = s3.client('s3', endpoint_url="https://storage.yandexcloud.net")
-
-    cl.put_object(
-        Bucket="moex-files",
-        Body=csv_buffer.getvalue(),
-        Metadata={
-            "type": "moex_data",
-        },
-        Key=f"{str_dt}.csv"
-    )
-    csv_buffer.close()
-
-
-'''
 with DAG(
         "etl_recost_get_data",
         default_args=default_args,
