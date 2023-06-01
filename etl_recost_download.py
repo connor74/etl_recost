@@ -23,44 +23,26 @@ default_args = {
 }
 
 
-def __get_dynamic_params(date, **kwargs):
-    print("TASK-1")
+def __get_dynamic_params(date):
     url = f"https://iss.moex.com//iss/history/engines/stock/zcyc.json?date={date}"
-    ti = kwargs['ti']
-    print(url)
     r = requests.get(url)
+
     if r.status_code == 200:
         data = r.json()['params']["data"]
         if data:
             data = data[-1]
             data.pop(1)
-            ti.xcom_push("dynamic_params", data)
         else:
             print("!!!!!!!!!!!! Нет данных")
 
-
-def insert_dynamic_params(**kwargs):
-    ti = kwargs['ti']
-    params = ti.xcom_pull(key="dynamic_params")
-    if params:
-        df = pd.DataFrame([params])
+    if data:
+        df = pd.DataFrame([data])
         pg_hook = PostgresHook.get_hook("pg_conn")
         engine = pg_hook.get_sqlalchemy_engine()
         df.columns = ["dt", "betha_0", "betha_1", "betha_2", "theta", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8",
                       "g9"]
-        print("После колонок:__________________________________________________________________")
         row_count = df.to_sql("dynamic_params", engine, schema="recost", if_exists='append', index=False)
         print(f'{row_count} rows was inserted')
-        """
-        pg_hook = PostgresHook(
-            postgres_conn_id='pg_conn',
-            schema='recost'
-        )
-        pg_conn = pg_hook.get_conn()
-        cursor = pg_conn.cursor()
-        cursor.execute(sql_stmt)
-        return cursor.fetchall()    
-        """
     else:
         print("DF is empty-----------------------------------------------")
 
@@ -198,11 +180,6 @@ with DAG(
         op_kwargs={
             "date": "{{ds}}"
         }
-    )
-
-    t_insert_dynamic_params = PythonOperator(
-        task_id="t_insert_dynamic_params",
-        python_callable=insert_dynamic_params,
     )
 
     t_get_history_data = PythonOperator(
